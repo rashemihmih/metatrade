@@ -275,8 +275,6 @@ class Strategy:
                 max_possible_balance = robot.account.get_total_balance() + self.wallet / own_rate
                 amount_to_add = (max_possible_balance - max_possible_balance % step -
                                  robot.account.get_total_balance()) * own_rate
-            if amount_to_add <= 0:
-                continue
             self.wallet -= amount_to_add
             robot.account.deposit(amount_to_add, own_rate, robot.bonuses_pieces)
 
