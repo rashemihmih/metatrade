@@ -140,7 +140,6 @@ class Robot:
         self.bonus_work_percent_per_cycle = bonus_work_percent_per_cycle
         self.account = Account(name)
         self.fuckup_count = 0
-        pass
 
     def fuck_it_all_up(self):
         loss = self.account.get_total_own_balance()
