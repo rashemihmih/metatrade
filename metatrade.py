@@ -162,7 +162,7 @@ class Robot:
     def work_cycle(self):
         account_balance = self.account.get_total_balance()
         if account_balance < self.min_working_amount:
-            self.log.info(f'Account balance {self.account.get_total_balance()} is less than '
+            self.log.info(f'Account balance {account_balance} is less than '
                           f'minimum working amount {self.min_working_amount}')
             return 0
         if not self.is_lucky():
