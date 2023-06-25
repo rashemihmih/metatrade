@@ -5,21 +5,28 @@ LOG_FORMAT = '[%(levelname)s] %(name)s: %(message)s'
 logging.basicConfig(format=LOG_FORMAT)
 
 
+class Bonus:
+    def __init__(self, amount):
+        self.start_amount = amount
+        self.amount = amount
+        self.worked_amount = 0
+
+
 class Account:
     def __init__(self, name):
         self.log = logging.getLogger(f'Account {name}')
         self.name = name
         self.own_balance = 0
         self.shared_own_balance = 0
-        self.bonus_balance = 0
         self.total_deposit = 0
         self.total_earnings = 0
         self.total_withdrawn = 0
         self.total_loss = 0
         self.total_bonus_loss = 0
+        self.bonuses = []
 
     def get_total_balance(self):
-        return self.own_balance + self.shared_own_balance + self.bonus_balance
+        return self.own_balance + self.shared_own_balance + self.get_bonus_balance()
 
     def get_own_balance(self):
         return self.own_balance
@@ -27,19 +34,30 @@ class Account:
     def get_total_own_balance(self):
         return self.own_balance + self.shared_own_balance
 
+    def get_bonus_balance(self):
+        return sum([bonus.amount for bonus in self.bonuses])
+
     def get_own_rate(self):
         total_balance = self.get_total_balance()
         if total_balance == 0:
             return 1
         return self.get_total_own_balance() / self.get_total_balance()
 
-    def deposit(self, amount, own_rate):
+    def deposit(self, amount, own_rate, bonuses_pieces):
+        remaining_bonus_pieces = 20 - len(self.bonuses)
+        if bonuses_pieces > remaining_bonus_pieces:
+            logging.info(f'Can\'t allocate {bonuses_pieces} bonus pieces: {len(self.bonuses)} used')
+            own_rate = 1
         shared_own_amount = amount * (1 / own_rate - 1) / 0.6
         own_amount = amount - shared_own_amount
         bonus_amount = shared_own_amount * 0.6
+        if bonus_amount > 0.01:
+            bonus_piece_amount = bonus_amount / bonuses_pieces
+            for i in range(bonuses_pieces):
+                bonus = Bonus(bonus_piece_amount)
+                self.bonuses.append(bonus)
         self.own_balance += own_amount
         self.shared_own_balance += shared_own_amount
-        self.bonus_balance += bonus_amount
         self.log.debug(f'Deposit {amount}')
         self.total_deposit += amount
         self.debug_stats()
@@ -58,49 +76,78 @@ class Account:
     def earn(self, amount):
         total_balance = self.get_total_balance()
         own_share = self.get_total_own_balance() / total_balance
-        bonus_share = self.bonus_balance / total_balance
+        bonus_balance = self.get_bonus_balance()
+        bonus_share = bonus_balance / total_balance
+        if len(self.bonuses) > 0:
+            for bonus in self.bonuses:
+                concrete_bonus_share = bonus.amount / bonus_balance * bonus_share
+                bonus.amount += amount * concrete_bonus_share
         self.own_balance += amount * own_share
-        self.bonus_balance += amount * bonus_share
         self.log.debug(f'Earned {amount}')
         self.total_earnings += amount
         self.debug_stats()
 
+    def work_bonus(self, percent):
+        work_amount = percent * self.get_total_balance()
+        removed_bonuses = []
+        for bonus in self.bonuses:
+            if work_amount <= 0:
+                break
+            work_left = bonus.start_amount - bonus.worked_amount
+            if work_left <= work_amount:
+                work_amount -= work_left
+                removed_bonuses.append(bonus)
+                shared_own_amount = bonus.start_amount / 0.6
+                self.shared_own_balance -= shared_own_amount
+                self.own_balance += bonus.amount + shared_own_amount
+            else:
+                bonus.worked_amount += work_amount
+                break
+        for bonus in removed_bonuses:
+            self.bonuses.remove(bonus)
+
     def cancel_bonus(self):
-        self.own_balance = self.get_total_balance()
-        self.shared_own_balance = 0
-        self.bonus_balance = 0
+        bonus = self.bonuses[0]
+        self.bonuses.remove(bonus)
+        shared_own_amount = bonus.start_amount / 0.6
+        self.shared_own_balance -= shared_own_amount
+        self.own_balance += bonus.amount + shared_own_amount
+        return bonus.amount
 
     def debug_stats(self):
-        self.log.debug(f'[ '
-                       f'Total: {self.get_total_balance()} | '
-                       f'Total own: {self.get_total_own_balance()} | '
-                       f'Available for withdrawal: {self.get_own_balance()} | '
-                       f'Bonus: {self.bonus_balance} ]')
+        if logging.root.isEnabledFor(logging.DEBUG):
+            self.log.debug(f'[ '
+                           f'Total: {self.get_total_balance()} | '
+                           f'Total own: {self.get_total_own_balance()} | '
+                           f'Available for withdrawal: {self.get_own_balance()} | '
+                           f'Bonus: {self.get_bonus_balance()} ]')
 
 
 class Robot:
-    def __init__(self, name, own_rate, income_percent_per_cycle, min_working_amount, working_amount_step,
-                 fuckup_probability_percent_per_cycle):
+    def __init__(self, name, own_rate, bonuses_pieces, income_percent_per_cycle, min_working_amount,
+                 working_amount_step, fuckup_probability_percent_per_cycle, bonus_work_percent_per_cycle):
         self.log = logging.getLogger(f'Robot {name}')
         self.name = name
         self.own_rate = own_rate
+        self.bonuses_pieces = bonuses_pieces
         self.income_percent_per_cycle = income_percent_per_cycle
         self.min_working_amount = min_working_amount
         self.working_amount_step = working_amount_step
         self.fuckup_probability_percent_per_cycle = fuckup_probability_percent_per_cycle
+        self.bonus_work_percent_per_cycle = bonus_work_percent_per_cycle
         self.account = Account(name)
         self.fuckup_count = 0
         pass
 
     def fuck_it_all_up(self):
         loss = self.account.get_total_own_balance()
-        bonus_loss = self.account.bonus_balance
+        bonus_loss = self.account.get_bonus_balance()
         self.fuckup_count += 1
         self.account.total_loss += loss
         self.account.total_bonus_loss += bonus_loss
         self.account.own_balance = 0
         self.account.shared_own_balance = 0
-        self.account.bonus_balance = 0
+        self.account.bonuses = []
         self.log.info(f'FUCKED IT ALL UP! Losing {loss} own and {bonus_loss} bonus money')
         self.account.total_loss += loss
         self.account.debug_stats()
@@ -124,15 +171,17 @@ class Robot:
         working_amount = account_balance - account_balance % step
         income = working_amount * self.income_percent_per_cycle
         self.account.earn(income)
+        self.account.work_bonus(self.bonus_work_percent_per_cycle)
         self.debug_stats()
         return income
 
     def debug_stats(self):
-        self.log.debug(f'[ '
-                       f'Total income: {self.account.total_earnings} | '
-                       f'Total loss: {self.account.total_loss} | '
-                       f'Total withdrawn: {self.account.total_withdrawn} | '
-                       f'Fuckup count: {self.fuckup_count} ]')
+        if logging.root.isEnabledFor(logging.DEBUG):
+            self.log.debug(f'[ '
+                           f'Total income: {self.account.total_earnings} | '
+                           f'Total loss: {self.account.total_loss} | '
+                           f'Total withdrawn: {self.account.total_withdrawn} | '
+                           f'Fuckup count: {self.fuckup_count} ]')
 
 
 class Strategy:
@@ -179,7 +228,7 @@ class Strategy:
         return sum([robot.account.shared_own_balance for robot in self.robots])
 
     def get_robots_bonus_balance(self):
-        return sum([robot.account.bonus_balance for robot in self.robots])
+        return sum([robot.account.get_bonus_balance() for robot in self.robots])
 
     def get_total_fuckup_count(self):
         return sum([robot.fuckup_count for robot in self.robots])
@@ -220,6 +269,8 @@ class Strategy:
             #     own_rate = 1
             target_robot_balance_considering_step = target_robot_balance - target_robot_balance % step
             amount_to_add = (target_robot_balance_considering_step - robot.account.get_total_balance()) * own_rate
+            if amount_to_add < 0.01:
+                continue
             if amount_to_add > self.wallet:
                 max_possible_balance = robot.account.get_total_balance() + self.wallet / own_rate
                 amount_to_add = (max_possible_balance - max_possible_balance % step -
@@ -227,7 +278,7 @@ class Strategy:
             if amount_to_add <= 0:
                 continue
             self.wallet -= amount_to_add
-            robot.account.deposit(amount_to_add, own_rate)
+            robot.account.deposit(amount_to_add, own_rate, robot.bonuses_pieces)
 
     def work_cycle(self):
         for robot in self.robots:
@@ -243,14 +294,13 @@ class Strategy:
                     if remaining_own_balance > 0:
                         robot.account.withdraw(remaining_own_balance)
                         self.wallet += remaining_own_balance
-                    if self.wallet >= robot.account.bonus_balance:
-                        self.log.info(f'Cancelling {robot.account.bonus_balance} bonuses from {robot.name}')
-                        self.wallet -= robot.account.bonus_balance
-                        robot.account.cancel_bonus()
-                        self.wallet += robot.account.get_total_balance()
-                        robot.account.withdraw(robot.account.get_total_balance())
+                    if self.wallet >= robot.account.bonuses[0].amount:
+                        self.log.info(f'Cancelling {robot.account.bonuses[0].amount} bonuses from {robot.name}')
+                        bonus_amount = robot.account.cancel_bonus()
+                        self.wallet -= bonus_amount
+                        assert self.wallet > 0
                     else:
-                        self.log.warning(f'Can\'t cancel bonuses: {self.wallet} < {robot.account.bonus_balance}')
+                        self.log.warning(f'Can\'t cancel bonus: {self.wallet} < {robot.account.bonuses[0].amount}')
         self.cycles += 1
         self.log.debug(f'Cycle {self.cycles} - investing {self.add_funds_per_cycle}')
         self.wallet += self.add_funds_per_cycle
@@ -258,44 +308,49 @@ class Strategy:
         strategy.debug_stats()
 
     def debug_stats(self):
-        self.log.debug(f'[ '
-                       f'Cycles lived: {self.cycles} | '
-                       f'Profit: {self.get_total_profit()} | '
-                       f'Deposited: {self.get_total_deposited_amount()} | '
-                       f'Invested: {self.get_max_invested_amount()} | '
-                       f'Withdrawn: {self.get_total_withdrawn()} | '
-                       f'Earnings: {self.get_total_earnings()} | '
-                       f'Total own balance: {self.get_total_own_balance()} | '
-                       f'Wallet balance: {self.wallet} | '
-                       f'Robots total balance: {self.get_robots_total_balance()} | '
-                       f'Robots total own balance: {self.get_robots_total_own_balance()} | '
-                       f'Robots own balance (available for withdrawal): {self.get_robots_own_balance()} | '
-                       f'Robots shared own balance: {self.get_robots_shared_own_balance()} | '
-                       f'Robots bonus balance: {self.get_robots_bonus_balance()} | '
-                       f'Fuckups survived: {self.get_total_fuckup_count()} | '
-                       f'Total loss: {self.get_total_loss()} | '
-                       f'Bonuses lost: {self.get_total_bonus_loss()} | '
-                       f'Can cancel bonuses: {self.can_cancel_bonuses()} '
-                       f']')
+        if logging.root.isEnabledFor(logging.DEBUG):
+            self.log.debug(f'[ '
+                           f'Cycles lived: {self.cycles} | '
+                           f'Profit: {self.get_total_profit()} | '
+                           f'Deposited: {self.get_total_deposited_amount()} | '
+                           f'Invested: {self.get_max_invested_amount()} | '
+                           f'Withdrawn: {self.get_total_withdrawn()} | '
+                           f'Earnings: {self.get_total_earnings()} | '
+                           f'Total own balance: {self.get_total_own_balance()} | '
+                           f'Wallet balance: {self.wallet} | '
+                           f'Robots total balance: {self.get_robots_total_balance()} | '
+                           f'Robots total own balance: {self.get_robots_total_own_balance()} | '
+                           f'Robots own balance (available for withdrawal): {self.get_robots_own_balance()} | '
+                           f'Robots shared own balance: {self.get_robots_shared_own_balance()} | '
+                           f'Robots bonus balance: {self.get_robots_bonus_balance()} | '
+                           f'Fuckups survived: {self.get_total_fuckup_count()} | '
+                           f'Total loss: {self.get_total_loss()} | '
+                           f'Bonuses lost: {self.get_total_bonus_loss()} | '
+                           f']')
 
 
 if __name__ == '__main__':
     logging.root.setLevel(logging.DEBUG)
-    own_rate = 1
 
-    cycles = 12
+    own_rate = .95
+    # own_rate = 1
+
+    cycles = 24
     negative_outcomes = 0
     positive_outcomes = 0
     total_runs = 10000
     total_profit = 0
+    total_balance = 0
+    total_bonus_balance = 0
     best_outcome = 0
     worst_outcome = 0
     for i in range(total_runs):
-        robot_safe = Robot('SAFE', own_rate, 0.05, 1000, 2000, 0.01)
-        robot_x = Robot('X', own_rate, 0.15, 300, 300, 0.1)
-        robot_max = Robot('MAX', own_rate, 0.15, 500, 500, 0.1)
-        robot_gx = Robot('GX', own_rate, 0.15, 1000, 1000, 0.1)
+        robot_safe = Robot('SAFE', own_rate, 4, 0.05, 1000, 2000, 0.01, 0.02 / 12)
+        robot_x = Robot('X', own_rate, 4, 0.15, 300, 300, 0.1, 0.06 / 12)
+        robot_max = Robot('MAX', own_rate, 4, 0.15, 500, 500, 0.1, 0.06 / 12)
+        robot_gx = Robot('GX', 1, 1, 0.15, 1000, 1000, 0.1, 0.01 / 12)
         strategy = Strategy([robot_safe, robot_x, robot_max, robot_gx], 16000, 4000, 12000 * 4)
+        # strategy = Strategy([robot_gx], 2000, 1000, 12000)
         for i in range(cycles):
             strategy.work_cycle()
         # for robot in strategy.robots:
@@ -311,13 +366,16 @@ if __name__ == '__main__':
             if best_outcome < profit:
                 best_outcome = profit
         total_profit += profit
-        logging.root.setLevel(logging.ERROR)
+        total_balance += strategy.get_robots_total_balance() + strategy.wallet
+        total_bonus_balance += strategy.get_robots_bonus_balance()
+        logging.root.setLevel(logging.WARNING)
     logging.root.setLevel(logging.DEBUG)
     # strategy.debug_stats()
-    logging.info(f'Own rate: {own_rate}')
     logging.info(f'Total runs: {total_runs} by {cycles} cycles')
     logging.info(f'Positive outcomes: {positive_outcomes}')
     logging.info(f'Negative outcomes: {negative_outcomes}')
     logging.info(f'Average profit: {total_profit / total_runs}')
+    logging.info(f'Average total balance: {total_balance / total_runs}')
+    logging.info(f'Average total bonus balance: {total_bonus_balance / total_runs}')
     logging.info(f'Best outcome: {best_outcome}')
     logging.info(f'Worst outcome: {worst_outcome}')
