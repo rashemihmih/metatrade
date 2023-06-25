@@ -106,8 +106,11 @@ class Account:
         for bonus in removed_bonuses:
             self.bonuses.remove(bonus)
 
+    def get_last_bonus(self):
+        return self.bonuses[len(self.bonuses) - 1]
+
     def cancel_bonus(self):
-        bonus = self.bonuses[0]
+        bonus = self.get_last_bonus()
         self.bonuses.remove(bonus)
         shared_own_amount = bonus.start_amount / 0.6
         self.shared_own_balance -= shared_own_amount
@@ -292,8 +295,8 @@ class Strategy:
                     if remaining_own_balance > 0:
                         robot.account.withdraw(remaining_own_balance)
                         self.wallet += remaining_own_balance
-                    if self.wallet >= robot.account.bonuses[0].amount:
-                        self.log.info(f'Cancelling {robot.account.bonuses[0].amount} bonuses from {robot.name}')
+                    if self.wallet >= robot.account.get_last_bonus().amount:
+                        self.log.info(f'Cancelling {robot.account.get_last_bonus().amount} bonuses from {robot.name}')
                         bonus_amount = robot.account.cancel_bonus()
                         self.wallet -= bonus_amount
                         assert self.wallet > 0
@@ -330,10 +333,10 @@ class Strategy:
 if __name__ == '__main__':
     logging.root.setLevel(logging.DEBUG)
 
-    own_rate = .95
+    own_rate = .96
     # own_rate = 1
 
-    cycles = 24
+    cycles = 12
     negative_outcomes = 0
     positive_outcomes = 0
     total_runs = 10000
@@ -348,7 +351,7 @@ if __name__ == '__main__':
         robot_max = Robot('MAX', own_rate, 4, 0.15, 500, 500, 0.1, 0.06 / 12)
         robot_gx = Robot('GX', 1, 1, 0.15, 1000, 1000, 0.1, 0.01 / 12)
         strategy = Strategy([robot_safe, robot_x, robot_max, robot_gx], 16000, 4000, 12000 * 4)
-        # strategy = Strategy([robot_gx], 2000, 1000, 12000)
+        # strategy = Strategy([robot_max], 2000, 1000, 12000)
         for i in range(cycles):
             strategy.work_cycle()
         # for robot in strategy.robots:
