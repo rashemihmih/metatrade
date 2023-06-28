@@ -150,7 +150,6 @@ class Robot:
         self.bonus_cancellations = 0
         self.bonus_cancellation_failures = 0
         self.fuckup_count = 0
-        pass
 
     def fuck_it_all_up(self):
         loss = self.account.get_total_own_balance()
@@ -173,7 +172,7 @@ class Robot:
     def work_cycle(self):
         working_amount = self.account.get_total_balance()
         if working_amount < self.min_working_amount:
-            self.log.info(f'Account balance {self.account.get_total_balance()} is less than '
+            self.log.info(f'Account balance {working_amount} is less than '
                           f'minimum working amount {self.min_working_amount}')
             return 0
         if not self.is_lucky():
