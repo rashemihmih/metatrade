@@ -1,3 +1,4 @@
+import datetime
 import logging
 import random
 
@@ -18,9 +19,9 @@ class Account:
         self.name = name
         self.own_balance = 0
         self.shared_own_balance = 0
-        self.total_deposit = 0
+        # self.total_deposit = 0
         self.total_earnings = 0
-        self.total_withdrawn = 0
+        # self.total_withdrawn = 0
         self.total_loss = 0
         self.total_bonus_loss = 0
         self.total_bonus_completed = 0
@@ -45,33 +46,40 @@ class Account:
         return self.get_total_own_balance() / self.get_total_balance()
 
     def deposit(self, amount, own_rate, bonuses_pieces):
-        remaining_bonus_pieces = 20 - len(self.bonuses)
-        if bonuses_pieces > remaining_bonus_pieces:
-            logging.info(f'Can\'t allocate {bonuses_pieces} bonus pieces: {len(self.bonuses)} used')
-            own_rate = 1
+        assert 0.625 <= own_rate <= 1
+        assert bonuses_pieces <= 20
         own_amount = amount
         shared_own_amount = 0
         if own_rate < 1:
-            shared_own_amount = amount * (1 / own_rate - 1) / 0.6
+            remaining_bonus_pieces = 20 - len(self.bonuses)
+            if bonuses_pieces > remaining_bonus_pieces:
+                logging.info(f'Can\'t allocate {bonuses_pieces} bonus pieces: {len(self.bonuses)} used')
+                if remaining_bonus_pieces == 0:
+                    own_rate = 1
+                else:
+                    own_rate = bonuses_pieces / (bonuses_pieces + remaining_bonus_pieces * (1 / own_rate - 1))
+                    bonuses_pieces = remaining_bonus_pieces
+            bonus_amount = amount * (1 - own_rate) / own_rate
+            shared_own_amount = bonus_amount / 0.6
             own_amount = amount - shared_own_amount
-            bonus_amount = shared_own_amount * 0.6
+            bonus_piece_amount = bonus_amount / bonuses_pieces
             if bonus_amount > 0.01:
-                bonus_piece_amount = bonus_amount / bonuses_pieces
                 for i in range(bonuses_pieces):
                     bonus = Bonus(bonus_piece_amount)
                     self.bonuses.append(bonus)
         self.own_balance += own_amount
         self.shared_own_balance += shared_own_amount
         self.log.debug(f'Deposit {amount}')
-        self.total_deposit += amount
+        # self.total_deposit += amount
         self.debug_stats()
 
     def withdraw(self, amount):
+        assert amount > 0.01
         if not self.can_withdraw(amount):
             raise ValueError(f'Can\'t withdraw {amount}: own balance is {self.own_balance}')
         self.own_balance -= amount
         self.log.debug(f'Withdraw {amount}')
-        self.total_withdrawn += amount
+        # self.total_withdrawn += amount
         self.debug_stats()
 
     def can_withdraw(self, amount):
@@ -132,7 +140,8 @@ class Account:
 
 
 class Robot:
-    def __init__(self, name, own_rate, bonuses_pieces, income_percent_per_cycle, min_working_amount, working_amount_step,
+    def __init__(self, name, own_rate, bonuses_pieces, income_percent_per_cycle, min_working_amount,
+                 working_amount_step,
                  max_working_amount, fuckup_probability_percent_per_cycle, bonus_work_percent_per_cycle):
         self.log = logging.getLogger(f'Robot {name}')
         self.name = name
@@ -193,9 +202,11 @@ class Robot:
     def debug_stats(self):
         if logging.root.isEnabledFor(logging.DEBUG):
             self.log.debug(f'[ '
-                           f'Total income: {self.account.total_earnings} | '
+                           f'Total earnings: {self.account.total_earnings} | '
                            f'Total loss: {self.account.total_loss} | '
-                           f'Total withdrawn: {self.account.total_withdrawn} | '
+                           f'Total bonuses loss: {self.account.total_bonus_loss} | '
+                           f'Total bonuses completed: {self.account.total_bonus_completed} | '
+                           # f'Total withdrawn: {self.account.total_withdrawn} | '
                            f'Withdraw failures: {self.withdraw_failures} | '
                            f'Bonus cancellations: {self.bonus_cancellations} | '
                            f'Bonus cancellation failures: {self.bonus_cancellation_failures} | '
@@ -203,14 +214,14 @@ class Robot:
 
 
 class Strategy:
-    def __init__(self, robots, start_amount, add_funds_period, robots_total_balance_limit):
+    def __init__(self, robots, start_amount, add_funds_per_period, robots_total_balance_limit):
         self.log = logging.getLogger('Strategy')
         self.withdraw_money_period = 7
         self.add_funds_period = 30
         self.rebalance_period = 30
         self.robots = robots
         self.start_amount = start_amount
-        self.add_funds_per_period = add_funds_period
+        self.add_funds_per_period = add_funds_per_period
         self.robots_total_balance_limit = robots_total_balance_limit
         self.wallet = start_amount
         self.cycles = 0
@@ -228,11 +239,11 @@ class Strategy:
     def get_total_earnings(self):
         return sum(robot.account.total_earnings for robot in self.robots)
 
-    def get_total_withdrawn(self):
-        return sum(robot.account.total_withdrawn for robot in self.robots)
+    # def get_total_withdrawn(self):
+    #     return sum(robot.account.total_withdrawn for robot in self.robots)
 
-    def get_total_deposited_amount(self):
-        return sum(robot.account.total_deposit for robot in self.robots)
+    # def get_total_deposited_amount(self):
+    #     return sum(robot.account.total_deposit for robot in self.robots)
 
     def get_robots_total_balance(self):
         return sum(robot.account.get_total_balance() for robot in self.robots)
@@ -292,8 +303,8 @@ class Strategy:
         for robot in self.robots:
             if robot.account.get_total_balance() < robot.min_working_amount \
                     and self.wallet / robot.own_rate < robot.min_working_amount:
-                self.log.warning(f'Not enough money in wallet ({self.wallet}) to start {robot.name}: '
-                                 f'minimal deposit is {robot.min_working_amount}')
+                self.log.info(f'Not enough money in wallet ({self.wallet}) to start {robot.name}: '
+                              f'minimal deposit is {robot.min_working_amount}')
                 continue
             step = robot.working_amount_step
             if target_robot_balance < robot.working_amount_step:
@@ -353,7 +364,7 @@ class Strategy:
                 if robot_balance < robot.working_amount_step:
                     step = robot.min_working_amount
                 amount_to_withdraw = robot_balance % step
-                if amount_to_withdraw == 0:
+                if amount_to_withdraw < 0.01:
                     continue
                 if robot.account.can_withdraw(amount_to_withdraw):
                     robot.account.withdraw(amount_to_withdraw)
@@ -363,10 +374,15 @@ class Strategy:
                     self.log.info(f'Can\'t withdraw {amount_to_withdraw} from {robot.name}: '
                                   f'{remaining_own_balance} own balance remaining')
                     robot.withdraw_failures += 1
-                    robot.account.withdraw(remaining_own_balance)
-                    self.wallet += remaining_own_balance
-                    amount_to_withdraw -= remaining_own_balance
-                    while amount_to_withdraw > 0.001:
+                    if remaining_own_balance > 0.01:
+                        robot.account.withdraw(remaining_own_balance)
+                        self.wallet += remaining_own_balance
+                        amount_to_withdraw -= remaining_own_balance
+                    while amount_to_withdraw > 0.01:
+                        if len(robot.account.bonuses) == 0:
+                            self.log.warning(f'Can\'t cancel bonus: no bonuses')
+                            robot.bonus_cancellation_failures += 1
+                            break
                         last_bonus = robot.account.get_last_bonus()
                         if self.wallet >= last_bonus.amount:
                             self.log.info(f'Cancelling {last_bonus.amount} bonuses from {robot.name}')
@@ -388,7 +404,7 @@ class Strategy:
                             break
         if self.should_rebalance() or fucked_it_up:
             self.rebalance()
-        strategy.debug_stats()
+        self.debug_stats()
 
     def should_withdraw(self):
         return self.cycles % self.withdraw_money_period == 0
@@ -405,9 +421,9 @@ class Strategy:
                            f'Cycles lived: {self.cycles} | '
                            f'Profit: {self.get_total_profit()} | '
                            f'Invested: {self.total_invested} | '
-                           f'Deposited: {self.get_total_deposited_amount()} | '
-                           f'Withdrawn: {self.get_total_withdrawn()} | '
-                           f'Withdrawn - Deposited: {self.get_total_withdrawn() - self.get_total_deposited_amount()} | '
+                           # f'Deposited: {self.get_total_deposited_amount()} | '
+                           # f'Withdrawn: {self.get_total_withdrawn()} | '
+                           # f'Withdrawn - Deposited: {self.get_total_withdrawn() - self.get_total_deposited_amount()} | '
                            f'Earnings: {self.get_total_earnings()} | '
                            f'Total own balance: {self.get_total_own_balance()} | '
                            f'Wallet balance: {self.wallet} | '
@@ -426,14 +442,227 @@ class Strategy:
                            f']')
 
 
-if __name__ == '__main__':
+class RobotTestCase:
+    def __init__(self, robot_balance_limit, cycles, total_runs, name, own_rate, bonuses_pieces,
+                 income_percent_per_cycle, min_working_amount, working_amount_step, max_working_amount,
+                 fuckup_probability_percent_per_cycle, bonus_work_percent_per_cycle, start_amount, add_funds_per_period,
+                 robots_total_balance_limit, summary_log):
+        self.robot_balance_limit = robot_balance_limit
+        self.cycles = cycles
+        self.total_runs = total_runs
+        self.name = name
+        self.own_rate = own_rate
+        self.bonuses_pieces = bonuses_pieces
+        self.income_percent_per_cycle = income_percent_per_cycle
+        self.min_working_amount = min_working_amount
+        self.working_amount_step = working_amount_step
+        self.max_working_amount = max_working_amount
+        self.fuckup_probability_percent_per_cycle = fuckup_probability_percent_per_cycle
+        self.bonus_work_percent_per_cycle = bonus_work_percent_per_cycle
+        self.start_amount = start_amount
+        self.add_funds_per_period = add_funds_per_period
+        self.robots_total_balance_limit = robots_total_balance_limit
+        self.negative_outcomes = 0
+        self.positive_outcomes = 0
+        self.total_profit = 0
+        self.total_balance = 0
+        self.total_bonus_balance = 0
+        self.best_outcome = 0
+        self.worst_outcome = 0
+        self.invested = 0
+        # self.total_deposited = 0
+        # self.total_withdrawn = 0
+        # self.withdrawn_minus_deposited = 0
+        self.withdraw_failures = 0
+        self.bonus_cancellations = 0
+        self.bonus_cancellation_failures = 0
+        self.bonuses_lost = 0
+        self.bonuses_completed = 0
+        self.summary_log = summary_log
+        self.errors = 0
+
+    def run(self):
+        handler = logging.FileHandler(
+            f'{self.name}_own_rate-{self.own_rate}_bonuses_pieces-{self.bonuses_pieces}_cycles-{self.cycles}_{datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")}.log')
+        logging.root.addHandler(handler)
+        logging.root.setLevel(logging.DEBUG)
+        for i in range(self.total_runs):
+            robot = Robot(self.name, self.own_rate, self.bonuses_pieces, self.income_percent_per_cycle,
+                          self.min_working_amount, self.working_amount_step, self.max_working_amount,
+                          self.fuckup_probability_percent_per_cycle, self.bonus_work_percent_per_cycle)
+            strategy = Strategy([robot], self.start_amount, self.add_funds_per_period, self.robots_total_balance_limit)
+            for j in range(self.cycles):
+                strategy.work_cycle()
+            profit = strategy.get_total_profit()
+            if profit <= 0:
+                self.negative_outcomes += 1
+                if profit < self.worst_outcome:
+                    self.worst_outcome = profit
+            else:
+                self.positive_outcomes += 1
+                if self.best_outcome < profit:
+                    self.best_outcome = profit
+            self.total_profit += profit
+            self.total_balance += strategy.get_robots_total_balance() + strategy.wallet
+            self.total_bonus_balance += strategy.get_robots_bonus_balance()
+            self.invested += strategy.total_invested
+            # total_deposited += strategy.get_total_deposited_amount()
+            # total_withdrawn += strategy.get_total_withdrawn()
+            # withdrawn_minus_deposited += strategy.get_total_withdrawn() - strategy.get_total_deposited_amount()
+            self.withdraw_failures += strategy.get_total_withdraw_failures()
+            self.bonus_cancellations += strategy.get_total_bonus_cancellations()
+            self.bonus_cancellation_failures += strategy.get_total_bonus_cancellations_failures()
+            self.bonuses_lost += strategy.get_total_bonus_loss()
+            self.bonuses_completed += strategy.get_total_bonus_completed()
+            logging.root.setLevel(logging.ERROR)
+        logging.root.setLevel(logging.INFO)
+        logging.info(f'Total runs: {self.total_runs} by {self.cycles} cycles')
+        logging.info(f'Positive outcomes: {self.positive_outcomes}')
+        logging.info(f'Negative outcomes: {self.negative_outcomes}')
+        logging.info(f'Average profit: {self.total_profit / self.total_runs}')
+        logging.info(f'Average total balance: {self.total_balance / self.total_runs}')
+        logging.info(f'Average total bonus balance: {self.total_bonus_balance / self.total_runs}')
+        logging.info(f'Best outcome: {self.best_outcome}')
+        logging.info(f'Worst outcome: {self.worst_outcome}')
+        logging.info(f'Invested: {self.invested / self.total_runs}')
+        # logging.info(f'Total deposited: {self.total_deposited / self.total_runs}')
+        # logging.info(f'Total withdrawn: {self.total_withdrawn / self.total_runs}')
+        # logging.info(f'Withdrawn - deposited: {self.withdrawn_minus_deposited / self.total_runs}')
+        logging.info(f'Withdraw failures: {self.withdraw_failures / self.total_runs}')
+        logging.info(f'Bonus cancellations: {self.bonus_cancellations / self.total_runs}')
+        logging.info(f'Bonus cancellation failures: {self.bonus_cancellation_failures / self.total_runs}')
+        logging.info(f'Bonuses lost: {self.bonuses_lost / self.total_runs}')
+        logging.info(f'Bonuses completed: {self.bonuses_completed / self.total_runs}')
+        logging.root.removeHandler(handler)
+        self.log_summary()
+
+    def log_summary(self):
+        self.summary_log.info(f'{self.name},'
+                              f'{self.own_rate},'
+                              f'{self.bonuses_pieces},'
+                              f'{self.total_runs},'
+                              f'{self.cycles},'
+                              f'{self.positive_outcomes},'
+                              f'{self.negative_outcomes},'
+                              f'{self.total_profit / self.total_runs},'
+                              f'{self.total_balance / self.total_runs},'
+                              f'{self.total_bonus_balance / self.total_runs},'
+                              f'{self.best_outcome},'
+                              f'{self.worst_outcome},'
+                              f'{self.invested / self.total_runs},'
+                              # f'{self.total_deposited / self.total_runs},'
+                              # f'{self.total_withdrawn / self.total_runs},'
+                              # f'{self.withdrawn_minus_deposited / self.total_runs},'
+                              f'{self.withdraw_failures / self.total_runs},'
+                              f'{self.bonus_cancellations / self.total_runs},'
+                              f'{self.bonus_cancellation_failures / self.total_runs},'
+                              f'{self.bonuses_lost / self.total_runs},'
+                              f'{self.bonuses_completed / self.total_runs},'
+                              f'{self.errors}')
+
+
+def test_safe():
+    summary_log = logging.getLogger('summary-safe')
+    handler = logging.FileHandler(f'summary-{datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")}.log.csv')
+    summary_log.addHandler(handler)
+    error_log = logging.getLogger('error')
+    error_handler = logging.FileHandler(f'error-{datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")}.log')
+    error_log.addHandler(error_handler)
+
+    summary_log.warning(f'Name,'
+                        f'Own rate,'
+                        f'Bonus pieces,'
+                        f'Total runs,'
+                        f'Cycles,'
+                        f'Positive outcomes,'
+                        f'Negative outcomes,'
+                        f'Average profit,'
+                        f'Average balance,'
+                        f'Average bonus balance,'
+                        f'Best outcome,'
+                        f'Worst outcome,'
+                        f'Average invested,'
+                        # f'Average deposited,'
+                        # f'Average withdrawn,'
+                        # f'Average withdrawn minus deposited,'
+                        f'Average withdraw failures,'
+                        f'Average bonus cancellations,'
+                        f'Average bonus cancellation failures,'
+                        f'Average bonuses lost,'
+                        f'Average bonuses completed,'
+                        f'Errors')
+    test_cases = [RobotTestCase(12000, cycles, 100000,
+                                'SAFE', own_rate, bonuses_pieces, 0.05 / 30, 1000, 2000, 12000, 0.01 / 30,
+                                0.02 / 12 / 30,
+                                1000, 1000, 12000, summary_log)
+                  for cycles in [12 * 30, 24 * 30, 36 * 30]
+                  for own_rate in [i / 100 for i in range(100, 62, -1)]
+                  for bonuses_pieces in range(1, 20)]
+    for test_case in test_cases:
+        try:
+            test_case.run()
+        except Exception as e:
+            test_case.errors += 1
+            error_log.exception(f'Name: {test_case.name}, '
+                                f'own rate: {test_case.own_rate}, '
+                                f'bonus pieces: {test_case.bonuses_pieces},'
+                                f'error: {e}')
+            print(e)
+
+
+def test_safe_mm100():
+    summary_log = logging.getLogger('summary-safe_mm100')
+    handler = logging.FileHandler(f'summary-{datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")}.log.csv')
+    summary_log.addHandler(handler)
+    error_log = logging.getLogger('error')
+    error_handler = logging.FileHandler(f'error-{datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")}.log')
+    error_log.addHandler(error_handler)
+
+    summary_log.warning(f'Name,'
+                        f'Own rate,'
+                        f'Bonus pieces,'
+                        f'Total runs,'
+                        f'Cycles,'
+                        f'Positive outcomes,'
+                        f'Negative outcomes,'
+                        f'Average profit,'
+                        f'Average balance,'
+                        f'Average bonus balance,'
+                        f'Best outcome,'
+                        f'Worst outcome,'
+                        f'Average invested,'
+                        # f'Average deposited,'
+                        # f'Average withdrawn,'
+                        # f'Average withdrawn minus deposited,'
+                        f'Average withdraw failures,'
+                        f'Average bonus cancellations,'
+                        f'Average bonus cancellation failures,'
+                        f'Average bonuses lost,'
+                        f'Average bonuses completed,'
+                        f'Errors')
+    test_cases = [RobotTestCase(12000, cycles, 100000,
+                                'SAFE_MM100', own_rate, bonuses_pieces, 0.1 / 30, 1000, 1000, 12000, 0.05 / 30,
+                                0.02 / 12 / 30,
+                                1000, 1000, 12000, summary_log)
+                  for cycles in [12 * 30, 24 * 30, 36 * 30]
+                  for own_rate in [i / 100 for i in range(100, 62, -1)]
+                  for bonuses_pieces in range(1, 20)]
+    for test_case in test_cases:
+        try:
+            test_case.run()
+        except Exception as e:
+            test_case.errors += 1
+            error_log.exception(f'Name: {test_case.name}, '
+                                f'own rate: {test_case.own_rate}, '
+                                f'bonus pieces: {test_case.bonuses_pieces},'
+                                f'error: {e}')
+            print(e)
+
+
+def test():
     logging.root.setLevel(logging.DEBUG)
 
     robot_balance_limit = 12000
-
-    # own_rate = .76
-    # own_rate = .96
-    own_rate = .76
 
     cycles = 36 * 30
     total_runs = 100
@@ -456,13 +685,16 @@ if __name__ == '__main__':
     bonuses_completed = 0
 
     for i in range(total_runs):
-        robot_safe = Robot('SAFE', .76, 1, 0.05 / 30, 1000, 2000, robot_balance_limit, 0.01 / 30, 0.02 / 12 / 30)
+        # handler = logging.FileHandler(f'run{i}.log')
+        # logging.root.addHandler(handler)
+        robot_safe = Robot('SAFE', .77, 14, 0.05 / 30, 1000, 2000, robot_balance_limit, 0.01 / 30, 0.02 / 12 / 30)
         robot_x = Robot('X', .76, 4, 0.15 / 30, 300, 300, robot_balance_limit, 0.1 / 30, 0.06 / 12 / 30)
         robot_max = Robot('MAX', .9, 4, 0.15 / 30, 500, 500, robot_balance_limit, 0.1 / 30, 0.06 / 12 / 30)
-        robot_gx = Robot('GX', own_rate, 1, 0.15 / 30, 1000, 1000, robot_balance_limit, 0.1 / 30, 0.01 / 12 / 30)
+
+        robot_gx = Robot('GX', 1, 1, 0.15 / 30, 1000, 1000, robot_balance_limit, 0.1 / 30, 0.01 / 12 / 30)
         # strategy = Strategy([robot_safe, robot_x, robot_max, robot_gx], 16000, 4000, robot_balance_limit * 4)
-        strategy = Strategy([robot_safe], 2000, 1000, 12000)
-        for i in range(cycles):
+        strategy = Strategy([robot_safe], 1000, 1000, 12000)
+        for j in range(cycles):
             strategy.work_cycle()
         # for robot in strategy.robots:
         #     robot.debug_stats()
@@ -480,17 +712,19 @@ if __name__ == '__main__':
         total_balance += strategy.get_robots_total_balance() + strategy.wallet
         total_bonus_balance += strategy.get_robots_bonus_balance()
         invested += strategy.total_invested
-        total_deposited += strategy.get_total_deposited_amount()
-        total_withdrawn += strategy.get_total_withdrawn()
-        withdrawn_minus_deposited += strategy.get_total_withdrawn() - strategy.get_total_deposited_amount()
+        # total_deposited += strategy.get_total_deposited_amount()
+        # total_withdrawn += strategy.get_total_withdrawn()
+        # withdrawn_minus_deposited += strategy.get_total_withdrawn() - strategy.get_total_deposited_amount()
         withdraw_failures += strategy.get_total_withdraw_failures()
         bonus_cancellations += strategy.get_total_bonus_cancellations()
         bonus_cancellation_failures += strategy.get_total_bonus_cancellations_failures()
         bonuses_lost += strategy.get_total_bonus_loss()
         bonuses_completed += strategy.get_total_bonus_completed()
         logging.root.setLevel(logging.WARNING)
-    logging.root.setLevel(logging.DEBUG)
+        # logging.root.removeHandler(handler)
+
     # strategy.debug_stats()
+    logging.root.setLevel(logging.INFO)
     logging.info(f'Total runs: {total_runs} by {cycles} cycles')
     logging.info(f'Positive outcomes: {positive_outcomes}')
     logging.info(f'Negative outcomes: {negative_outcomes}')
@@ -500,11 +734,18 @@ if __name__ == '__main__':
     logging.info(f'Best outcome: {best_outcome}')
     logging.info(f'Worst outcome: {worst_outcome}')
     logging.info(f'Invested: {invested / total_runs}')
-    logging.info(f'Total deposited: {total_deposited / total_runs}')
-    logging.info(f'Total withdrawn: {total_withdrawn / total_runs}')
-    logging.info(f'Withdrawn - deposited: {withdrawn_minus_deposited / total_runs}')
+    # logging.info(f'Total deposited: {total_deposited / total_runs}')
+    # logging.info(f'Total withdrawn: {total_withdrawn / total_runs}')
+    # logging.info(f'Withdrawn - deposited: {withdrawn_minus_deposited / total_runs}')
     logging.info(f'Withdraw failures: {withdraw_failures / total_runs}')
     logging.info(f'Bonus cancellations: {bonus_cancellations / total_runs}')
     logging.info(f'Bonus cancellation failures: {bonus_cancellation_failures / total_runs}')
     logging.info(f'Bonuses lost: {bonuses_lost / total_runs}')
     logging.info(f'Bonuses completed: {bonuses_completed / total_runs}')
+
+
+if __name__ == '__main__':
+    # test_safe()
+    test_safe_mm100()
+    # random.seed(1)
+    # test()
