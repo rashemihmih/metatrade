@@ -1,5 +1,5 @@
-import datetime
 import logging
+import os.path
 import random
 
 LOG_FORMAT = '[%(levelname)s] %(name)s: %(message)s'
@@ -482,8 +482,10 @@ class RobotTestCase:
         self.errors = 0
 
     def run(self):
-        handler = logging.FileHandler(
-            f'{self.name}_own_rate-{self.own_rate}_bonuses_pieces-{self.bonuses_pieces}_cycles-{self.cycles}_{datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")}.log')
+        log_name = f'{self.name}_own_rate-{self.own_rate}_bonuses_pieces-{self.bonuses_pieces}_cycles-{self.cycles}.log'
+        if os.path.exists(log_name):
+            return
+        handler = logging.FileHandler(log_name)
         logging.root.addHandler(handler)
         logging.root.setLevel(logging.DEBUG)
         for i in range(self.total_runs):
@@ -563,10 +565,10 @@ class RobotTestCase:
 
 def test_safe():
     summary_log = logging.getLogger('summary-safe')
-    handler = logging.FileHandler(f'summary-{datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")}.log.csv')
+    handler = logging.FileHandler(f'summary-SAFE.csv')
     summary_log.addHandler(handler)
     error_log = logging.getLogger('error')
-    error_handler = logging.FileHandler(f'error-{datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")}.log')
+    error_handler = logging.FileHandler(f'error-SAFE.log')
     error_log.addHandler(error_handler)
 
     summary_log.warning(f'Name,'
@@ -612,10 +614,10 @@ def test_safe():
 
 def test_safe_mm100():
     summary_log = logging.getLogger('summary-safe_mm100')
-    handler = logging.FileHandler(f'summary-{datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")}.log.csv')
+    handler = logging.FileHandler(f'summary-SAFE_MM100.csv')
     summary_log.addHandler(handler)
     error_log = logging.getLogger('error')
-    error_handler = logging.FileHandler(f'error-{datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")}.log')
+    error_handler = logging.FileHandler(f'error-SAFE_MM100.log')
     error_log.addHandler(error_handler)
 
     summary_log.warning(f'Name,'
