@@ -713,6 +713,56 @@ def test_max():
             print(e)
 
 
+def test_gxu():
+    summary_log = logging.getLogger('summary-GXU')
+    handler = logging.FileHandler(f'summary-GXU.csv')
+    summary_log.addHandler(handler)
+    error_log = logging.getLogger('error')
+    error_handler = logging.FileHandler(f'error-GXU.log')
+    error_log.addHandler(error_handler)
+
+    if not os.path.exists(f'summary-gxu.csv'):
+        summary_log.warning(f'Name,'
+                            f'Own rate,'
+                            f'Bonus pieces,'
+                            f'Total runs,'
+                            f'Cycles,'
+                            f'Positive outcomes,'
+                            f'Negative outcomes,'
+                            f'Average profit,'
+                            f'Average balance,'
+                            f'Average bonus balance,'
+                            f'Best outcome,'
+                            f'Worst outcome,'
+                            f'Average invested,'
+                            # f'Average deposited,'
+                            # f'Average withdrawn,'
+                            # f'Average withdrawn minus deposited,'
+                            f'Average withdraw failures,'
+                            f'Average bonus cancellations,'
+                            f'Average bonus cancellation failures,'
+                            f'Average bonuses lost,'
+                            f'Average bonuses completed,'
+                            f'Errors')
+    test_cases = [RobotTestCase(12000, cycles, 100000,
+                                'GXU', own_rate, bonuses_pieces, 0.5 / 30, 1000, 1000, 12000, 0.4 / 30,
+                                0.01 / 12 / 30,
+                                1000, 1000, 12000, summary_log)
+                  for cycles in [12 * 30, 24 * 30, 36 * 30]
+                  for own_rate in [i / 100 for i in range(100, 62, -1)]
+                  for bonuses_pieces in range(1, 20)]
+    for test_case in test_cases:
+        try:
+            test_case.run()
+        except Exception as e:
+            test_case.errors += 1
+            error_log.exception(f'Name: {test_case.name}, '
+                                f'own rate: {test_case.own_rate}, '
+                                f'bonus pieces: {test_case.bonuses_pieces},'
+                                f'error: {e}')
+            print(e)
+
+
 def test():
     logging.root.setLevel(logging.DEBUG)
 
@@ -801,6 +851,7 @@ def test():
 if __name__ == '__main__':
     # test_safe()
     # test_safe_mm100()
-    test_max()
+    # test_max()
+    test_gxu()
     # random.seed(1)
     # test()
